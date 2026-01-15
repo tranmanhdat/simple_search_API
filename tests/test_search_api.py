@@ -23,17 +23,17 @@ def override_get_db():
 
 app.dependency_overrides[get_db] = override_get_db
 
-# Store original max_requests value
-original_max_requests = rate_limiter.max_requests
 
 # Disable rate limiting during tests except for rate limiting tests
 @pytest.fixture(autouse=True)
 def disable_rate_limit():
     """Disable rate limiting for tests by setting a very high limit."""
+    # Store original value from the rate_limiter in app.main
+    original = rate_limiter.max_requests
     rate_limiter.max_requests = 999999
     rate_limiter.requests.clear()
     yield
-    rate_limiter.max_requests = original_max_requests
+    rate_limiter.max_requests = original
     rate_limiter.requests.clear()
 
 

@@ -3,13 +3,11 @@ from sqlalchemy.orm import sessionmaker, DeclarativeBase
 
 DATABASE_URL = "sqlite:///./employees.db"
 
+# Note: SQLite doesn't use connection pooling, but these settings
+# are kept for potential future migration to server-based databases
 engine = create_engine(
     DATABASE_URL, 
     connect_args={"check_same_thread": False},
-    # Performance optimizations for SQLite
-    pool_pre_ping=True,
-    pool_size=20,
-    max_overflow=0,
 )
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
