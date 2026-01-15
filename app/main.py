@@ -7,11 +7,7 @@ from datetime import datetime, timedelta
 import logging
 
 from app.database import get_db, init_db, Employee
-from app.schemas import (
-    EmployeeCreate,
-    EmployeeUpdate,
-    EmployeeResponse,
-)
+from app.schemas import EmployeeResponse
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -99,7 +95,7 @@ async def lifespan(app: FastAPI):
 # Create FastAPI app
 app = FastAPI(
     title="Employee Search Directory API",
-    description="A FastAPI microservice for managing and searching employee directory",
+    description="A FastAPI microservice for searching employee directory",
     version="1.0.0",
     lifespan=lifespan,
 )
@@ -115,83 +111,7 @@ async def root(request: Request, _: None = Depends(check_rate_limit)):
     }
 
 
-@app.post(
-    "/employees/",
-    response_model=EmployeeResponse,
-    status_code=201,
-    tags=["Employees"],
-)
-async def create_employee(
-    request: Request,
-    employee: EmployeeCreate,
-    db: Session = Depends(get_db),
-    _: None = Depends(check_rate_limit),
-):
-    """Create a new employee."""
-    db_employee = Employee(**employee.model_dump())
-    db.add(db_employee)
-    db.commit()
-    db.refresh(db_employee)
-    logger.info(f"Created employee with ID: {db_employee.id}")
-    return db_employee
-
-
-@app.get("/employees/{employee_id}", response_model=EmployeeResponse, tags=["Employees"])
-async def get_employee(
-    request: Request,
-    employee_id: int,
-    db: Session = Depends(get_db),
-    _: None = Depends(check_rate_limit),
-):
-    """Get a specific employee by ID."""
-    employee = db.query(Employee).filter(Employee.id == employee_id).first()
-    if not employee:
-        raise HTTPException(status_code=404, detail="Employee not found")
-    return employee
-
-
-@app.put("/employees/{employee_id}", response_model=EmployeeResponse, tags=["Employees"])
-async def update_employee(
-    request: Request,
-    employee_id: int,
-    employee_update: EmployeeUpdate,
-    db: Session = Depends(get_db),
-    _: None = Depends(check_rate_limit),
-):
-    """Update an existing employee."""
-    db_employee = db.query(Employee).filter(Employee.id == employee_id).first()
-    if not db_employee:
-        raise HTTPException(status_code=404, detail="Employee not found")
-
-    update_data = employee_update.model_dump(exclude_unset=True)
-    for field, value in update_data.items():
-        setattr(db_employee, field, value)
-
-    db.commit()
-    db.refresh(db_employee)
-    logger.info(f"Updated employee with ID: {employee_id}")
-    return db_employee
-
-
-@app.delete("/employees/{employee_id}", status_code=204, tags=["Employees"])
-async def delete_employee(
-    request: Request,
-    employee_id: int,
-    db: Session = Depends(get_db),
-    _: None = Depends(check_rate_limit),
-):
-    """Delete an employee."""
-    db_employee = db.query(Employee).filter(Employee.id == employee_id).first()
-    if not db_employee:
-        raise HTTPException(status_code=404, detail="Employee not found")
-
-    db.delete(db_employee)
-    db.commit()
-    logger.info(f"Deleted employee with ID: {employee_id}")
-    return None
-
-
-@app.get("/employees/", response_model=List[EmployeeResponse], tags=["Employees"])
+@app.get("/employees/", response_model=List[EmployeeResponse], tags=["Search"])
 async def search_employees(
     request: Request,
     name: Optional[str] = Query(None, description="Search by first name or last name"),
@@ -199,6 +119,8 @@ async def search_employees(
     position: Optional[str] = Query(None, description="Filter by position"),
     location: Optional[str] = Query(None, description="Filter by location"),
     status: str = Query("all", description="Filter by status: 0, 1, 2, all, or comma-separated like '0,1'"),
+    limit: int = Query(100, ge=1, le=1000, description="Maximum number of results to return"),
+    offset: int = Query(0, ge=0, description="Number of results to skip"),
     db: Session = Depends(get_db),
     _: None = Depends(check_rate_limit),
 ):
@@ -210,6 +132,8 @@ async def search_employees(
     - **position**: Exact match for position
     - **location**: Exact match for location
     - **status**: Filter by status - can be "0", "1", "2", "all", or comma-separated like "0,1" or "0,1,2"
+    - **limit**: Maximum number of results (default: 100, max: 1000)
+    - **offset**: Skip this many results (for pagination)
     """
     query = db.query(Employee)
 
@@ -247,6 +171,9 @@ async def search_employees(
     if location:
         query = query.filter(Employee.location == location)
 
+    # Apply pagination
+    query = query.offset(offset).limit(limit)
+    
     employees = query.all()
     logger.info(f"Search returned {len(employees)} employees")
     return employees

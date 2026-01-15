@@ -1,16 +1,18 @@
 # Employee Search Directory API
 
-A FastAPI-based microservice for managing and searching an employee directory with SQLite database, comprehensive filtering, and custom rate limiting.
+A FastAPI-based microservice for searching an employee directory with SQLite database, comprehensive filtering, pagination, and custom rate limiting. Optimized for large datasets (4M+ records).
 
 ## Features
 
 - 🚀 **FastAPI** - Modern, fast web framework for building APIs
-- 💾 **SQLite Database** - Lightweight, serverless database
-- 🔍 **Advanced Search** - Search by name, department, position, location, and status
+- 💾 **SQLite Database** - Lightweight, serverless database with performance optimizations
+- 🔍 **Advanced Search** - Search by name, department, position, location, and status with pagination
+- 📊 **Large Dataset Support** - Optimized for 4 million+ records with composite indexes
 - 🛡️ **Custom Rate Limiting** - 30 requests per minute per IP (custom implementation, no external libraries)
-- ✅ **Comprehensive Tests** - 25 unit tests with 100% pass rate
+- ✅ **Comprehensive Tests** - 19 unit tests with 100% pass rate
 - 📝 **OpenAPI Documentation** - Auto-generated interactive API docs (OpenAPI 3.0)
 - 🐳 **Docker Support** - Fully containerized application
+- ⚡ **Performance Script** - Bulk insert script for populating and testing with millions of records
 
 ## Table Schema
 
@@ -116,63 +118,6 @@ GET /
 
 Returns API status and version information.
 
-### Create Employee
-
-```http
-POST /employees/
-```
-
-**Request Body:**
-```json
-{
-  "first_name": "John",
-  "last_name": "Doe",
-  "contact_info": "{\"phone\": \"123-456-7890\", \"email\": \"john.doe@example.com\"}",
-  "department": "Engineering",
-  "position": "Software Engineer",
-  "location": "New York",
-  "status": 1
-}
-```
-
-**Rate Limit:** 30 requests/minute (shared across all endpoints)
-
-### Get Employee
-
-```http
-GET /employees/{employee_id}
-```
-
-Retrieve a specific employee by ID.
-
-**Rate Limit:** 30 requests/minute (shared across all endpoints)
-
-### Update Employee
-
-```http
-PUT /employees/{employee_id}
-```
-
-Update an existing employee. All fields are optional.
-
-**Request Body:**
-```json
-{
-  "position": "Senior Software Engineer",
-  "status": 2
-}
-```
-
-**Rate Limit:** 30 requests/minute (shared across all endpoints)
-
-### Delete Employee
-
-```http
-DELETE /employees/{employee_id}
-```
-
-Delete an employee by ID.
-
 **Rate Limit:** 30 requests/minute (shared across all endpoints)
 
 ### Search Employees
@@ -181,7 +126,7 @@ Delete an employee by ID.
 GET /employees/
 ```
 
-Search and filter employees with multiple parameters.
+Search and filter employees with multiple parameters and pagination support.
 
 **Query Parameters:**
 
@@ -193,30 +138,63 @@ Search and filter employees with multiple parameters.
   - Single value: `0`, `1`, or `2`
   - Multiple values: `0,1` or `0,1,2`
   - All statuses: `all`
+- `limit` (optional, default=100, max=1000): Maximum number of results to return
+- `offset` (optional, default=0): Number of results to skip (for pagination)
 
 **Examples:**
 
 ```bash
-# Get all active employees (status 1)
+# Get all active employees (status 1), first 100 results
 GET /employees/?status=1
 
-# Get employees with status 0 or 1
-GET /employees/?status=0,1
+# Get employees with status 0 or 1, with pagination
+GET /employees/?status=0,1&limit=50&offset=100
 
 # Search by name
 GET /employees/?name=John
 
-# Filter by department
-GET /employees/?department=Engineering
+# Filter by department with limit
+GET /employees/?department=Engineering&limit=200
 
 # Combined filters
 GET /employees/?department=Engineering&location=New York&status=1
 
 # Search by name in Engineering department with active status
 GET /employees/?name=Smith&department=Engineering&status=1
+
+# Pagination example - get next page
+GET /employees/?limit=100&offset=100
 ```
 
 **Rate Limit:** 30 requests/minute (shared across all endpoints)
+
+## Populating the Database
+
+A high-performance bulk insert script is provided to populate the database with millions of records for testing.
+
+### Running the Insert Script
+
+```bash
+# Insert 4 million records (default)
+python3 insert_employees.py
+
+# Insert custom number of records
+python3 insert_employees.py 1000000
+
+# Custom records and batch size
+python3 insert_employees.py 5000000 20000
+```
+
+The script includes:
+- Progress monitoring with ETA
+- Automatic index creation
+- Performance testing of common queries
+- Database statistics reporting
+
+**Performance Characteristics:**
+- Inserts ~50,000-100,000 records/second (depending on hardware)
+- Creates composite indexes for optimal query performance
+- Includes query performance benchmarks
 
 ## Rate Limiting
 
