@@ -25,17 +25,23 @@ class RateLimiter:
     def __init__(self, max_requests: int = 30):
         self.max_requests = max_requests
         self.requests = defaultdict(list)  # IP -> list of request timestamps
+        self.last_cleanup = datetime.now()
     
     def is_allowed(self, client_ip: str) -> bool:
         """Check if a request from the given IP is allowed."""
         now = datetime.now()
         one_minute_ago = now - timedelta(minutes=1)
         
-        # Clean up old requests
+        # Clean up old requests for this IP
         self.requests[client_ip] = [
             timestamp for timestamp in self.requests[client_ip]
             if timestamp > one_minute_ago
         ]
+        
+        # Periodically cleanup old IP entries (every 5 minutes)
+        if (now - self.last_cleanup).total_seconds() > 300:
+            self._cleanup_old_entries()
+            self.last_cleanup = now
         
         # Check if under limit
         if len(self.requests[client_ip]) >= self.max_requests:
@@ -45,13 +51,13 @@ class RateLimiter:
         self.requests[client_ip].append(now)
         return True
     
-    def cleanup_old_entries(self):
-        """Remove entries for IPs that haven't made requests recently."""
+    def _cleanup_old_entries(self):
+        """Remove entries for IPs that haven't made requests recently (internal method)."""
         now = datetime.now()
         one_minute_ago = now - timedelta(minutes=1)
         
         ips_to_remove = []
-        for ip, timestamps in self.requests.items():
+        for ip, timestamps in list(self.requests.items()):
             # Remove old timestamps
             self.requests[ip] = [ts for ts in timestamps if ts > one_minute_ago]
             # Mark for removal if no recent requests

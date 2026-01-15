@@ -105,7 +105,6 @@ Once the server is running, you can access:
 - **Interactive API docs (Swagger UI)**: http://localhost:8000/docs
 - **Alternative API docs (ReDoc)**: http://localhost:8000/redoc
 - **OpenAPI JSON**: http://localhost:8000/openapi.json
-- **Alternative API docs (ReDoc)**: http://localhost:8000/redoc
 
 ## API Endpoints
 
