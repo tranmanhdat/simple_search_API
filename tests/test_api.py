@@ -2,7 +2,7 @@ import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
-from app.main import app, limiter
+from app.main import app, rate_limiter
 from app.database import Base, get_db
 import json
 
@@ -23,13 +23,18 @@ def override_get_db():
 
 app.dependency_overrides[get_db] = override_get_db
 
+# Store original max_requests value
+original_max_requests = rate_limiter.max_requests
+
 # Disable rate limiting during tests except for rate limiting tests
 @pytest.fixture(autouse=True)
 def disable_rate_limit():
-    """Disable rate limiting for tests."""
-    limiter.enabled = False
+    """Disable rate limiting for tests by setting a very high limit."""
+    rate_limiter.max_requests = 999999
+    rate_limiter.requests.clear()
     yield
-    limiter.enabled = True
+    rate_limiter.max_requests = original_max_requests
+    rate_limiter.requests.clear()
 
 
 @pytest.fixture(scope="function")
@@ -333,25 +338,38 @@ class TestRateLimiting:
     @pytest.fixture
     def enable_rate_limit(self):
         """Enable rate limiting for specific tests."""
-        limiter.enabled = True
+        rate_limiter.max_requests = 30
+        rate_limiter.requests.clear()
         yield
-        limiter.enabled = False
+        rate_limiter.max_requests = 999999
+        rate_limiter.requests.clear()
 
     def test_rate_limit_enforcement(self, client, sample_employee, enable_rate_limit):
         """Test that rate limiting is enforced."""
-        # Make multiple requests to trigger rate limit
-        # Note: This is a basic test. In production, you might want more sophisticated testing
+        # Make multiple requests to trigger rate limit (limit is 30/minute)
         responses = []
-        for _ in range(25):  # Limit is 20/minute for create
+        for _ in range(35):
             response = client.post("/employees/", json=sample_employee)
             responses.append(response.status_code)
 
         # At least one request should be rate limited (429)
         assert 429 in responses
+        # Count successful and rate-limited responses
+        successful = responses.count(201)
+        rate_limited = responses.count(429)
+        assert successful == 30  # First 30 should succeed
+        assert rate_limited == 5  # Last 5 should be rate limited
 
     def test_rate_limit_different_endpoints(self, client, enable_rate_limit):
-        """Test that different endpoints have independent rate limits."""
-        # Health endpoint has 100/minute limit
-        for _ in range(10):
-            response = client.get("/")
-            assert response.status_code == 200
+        """Test that rate limiting applies to all endpoints equally."""
+        # All endpoints share the same 30/minute limit per IP
+        responses = []
+        for i in range(35):
+            if i % 2 == 0:
+                response = client.get("/")
+            else:
+                response = client.get("/employees/")
+            responses.append(response.status_code)
+        
+        # Should have some rate limited responses
+        assert 429 in responses

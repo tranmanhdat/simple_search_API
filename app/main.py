@@ -1,10 +1,9 @@
 from fastapi import FastAPI, Depends, HTTPException, Query, Request
 from sqlalchemy.orm import Session
-from slowapi import Limiter, _rate_limit_exceeded_handler
-from slowapi.util import get_remote_address
-from slowapi.errors import RateLimitExceeded
 from typing import List, Optional
 from contextlib import asynccontextmanager
+from collections import defaultdict
+from datetime import datetime, timedelta
 import logging
 
 from app.database import get_db, init_db, Employee
@@ -18,8 +17,65 @@ from app.schemas import (
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+
+# Custom rate limiter implementation
+class RateLimiter:
+    """Simple in-memory rate limiter that tracks requests per IP per minute."""
+    
+    def __init__(self, max_requests: int = 30):
+        self.max_requests = max_requests
+        self.requests = defaultdict(list)  # IP -> list of request timestamps
+    
+    def is_allowed(self, client_ip: str) -> bool:
+        """Check if a request from the given IP is allowed."""
+        now = datetime.now()
+        one_minute_ago = now - timedelta(minutes=1)
+        
+        # Clean up old requests
+        self.requests[client_ip] = [
+            timestamp for timestamp in self.requests[client_ip]
+            if timestamp > one_minute_ago
+        ]
+        
+        # Check if under limit
+        if len(self.requests[client_ip]) >= self.max_requests:
+            return False
+        
+        # Add current request
+        self.requests[client_ip].append(now)
+        return True
+    
+    def cleanup_old_entries(self):
+        """Remove entries for IPs that haven't made requests recently."""
+        now = datetime.now()
+        one_minute_ago = now - timedelta(minutes=1)
+        
+        ips_to_remove = []
+        for ip, timestamps in self.requests.items():
+            # Remove old timestamps
+            self.requests[ip] = [ts for ts in timestamps if ts > one_minute_ago]
+            # Mark for removal if no recent requests
+            if not self.requests[ip]:
+                ips_to_remove.append(ip)
+        
+        for ip in ips_to_remove:
+            del self.requests[ip]
+
+
 # Initialize rate limiter
-limiter = Limiter(key_func=get_remote_address)
+rate_limiter = RateLimiter(max_requests=30)
+
+
+async def check_rate_limit(request: Request):
+    """Dependency to check rate limit for incoming requests."""
+    client_ip = request.client.host if request.client else "unknown"
+    
+    if not rate_limiter.is_allowed(client_ip):
+        logger.warning(f"Rate limit exceeded for IP: {client_ip}")
+        raise HTTPException(
+            status_code=429,
+            detail="Rate limit exceeded. Maximum 30 requests per minute allowed."
+        )
 
 
 @asynccontextmanager
@@ -28,6 +84,7 @@ async def lifespan(app: FastAPI):
     # Startup
     init_db()
     logger.info("Database initialized successfully")
+    logger.info("Rate limiter initialized: 30 requests per minute per IP")
     yield
     # Shutdown (if needed)
     logger.info("Application shutting down")
@@ -41,14 +98,9 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-# Add rate limiter to app
-app.state.limiter = limiter
-app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
-
 
 @app.get("/", tags=["Health"])
-@limiter.limit("100/minute")
-async def root(request: Request):
+async def root(request: Request, _: None = Depends(check_rate_limit)):
     """Root endpoint for health check."""
     return {
         "message": "Employee Search Directory API",
@@ -63,9 +115,11 @@ async def root(request: Request):
     status_code=201,
     tags=["Employees"],
 )
-@limiter.limit("20/minute")
 async def create_employee(
-    request: Request, employee: EmployeeCreate, db: Session = Depends(get_db)
+    request: Request,
+    employee: EmployeeCreate,
+    db: Session = Depends(get_db),
+    _: None = Depends(check_rate_limit),
 ):
     """Create a new employee."""
     db_employee = Employee(**employee.model_dump())
@@ -77,8 +131,12 @@ async def create_employee(
 
 
 @app.get("/employees/{employee_id}", response_model=EmployeeResponse, tags=["Employees"])
-@limiter.limit("50/minute")
-async def get_employee(request: Request, employee_id: int, db: Session = Depends(get_db)):
+async def get_employee(
+    request: Request,
+    employee_id: int,
+    db: Session = Depends(get_db),
+    _: None = Depends(check_rate_limit),
+):
     """Get a specific employee by ID."""
     employee = db.query(Employee).filter(Employee.id == employee_id).first()
     if not employee:
@@ -87,12 +145,12 @@ async def get_employee(request: Request, employee_id: int, db: Session = Depends
 
 
 @app.put("/employees/{employee_id}", response_model=EmployeeResponse, tags=["Employees"])
-@limiter.limit("20/minute")
 async def update_employee(
     request: Request,
     employee_id: int,
     employee_update: EmployeeUpdate,
     db: Session = Depends(get_db),
+    _: None = Depends(check_rate_limit),
 ):
     """Update an existing employee."""
     db_employee = db.query(Employee).filter(Employee.id == employee_id).first()
@@ -110,8 +168,12 @@ async def update_employee(
 
 
 @app.delete("/employees/{employee_id}", status_code=204, tags=["Employees"])
-@limiter.limit("20/minute")
-async def delete_employee(request: Request, employee_id: int, db: Session = Depends(get_db)):
+async def delete_employee(
+    request: Request,
+    employee_id: int,
+    db: Session = Depends(get_db),
+    _: None = Depends(check_rate_limit),
+):
     """Delete an employee."""
     db_employee = db.query(Employee).filter(Employee.id == employee_id).first()
     if not db_employee:
@@ -124,7 +186,6 @@ async def delete_employee(request: Request, employee_id: int, db: Session = Depe
 
 
 @app.get("/employees/", response_model=List[EmployeeResponse], tags=["Employees"])
-@limiter.limit("50/minute")
 async def search_employees(
     request: Request,
     name: Optional[str] = Query(None, description="Search by first name or last name"),
@@ -133,6 +194,7 @@ async def search_employees(
     location: Optional[str] = Query(None, description="Filter by location"),
     status: str = Query("all", description="Filter by status: 0, 1, 2, all, or comma-separated like '0,1'"),
     db: Session = Depends(get_db),
+    _: None = Depends(check_rate_limit),
 ):
     """
     Search employees with various filters.

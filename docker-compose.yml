@@ -1,0 +1,14 @@
+# Docker Compose configuration for Employee Search API
+version: '3.8'
+
+services:
+  api:
+    build: .
+    container_name: employee-search-api
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./data:/app/data
+    environment:
+      - DATABASE_URL=sqlite:///./data/employees.db
+    restart: unless-stopped

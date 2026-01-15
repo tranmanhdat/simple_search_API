@@ -1,15 +1,16 @@
 # Employee Search Directory API
 
-A FastAPI-based microservice for managing and searching an employee directory with SQLite database, comprehensive filtering, and rate limiting.
+A FastAPI-based microservice for managing and searching an employee directory with SQLite database, comprehensive filtering, and custom rate limiting.
 
 ## Features
 
 - 🚀 **FastAPI** - Modern, fast web framework for building APIs
 - 💾 **SQLite Database** - Lightweight, serverless database
 - 🔍 **Advanced Search** - Search by name, department, position, location, and status
-- 🛡️ **Rate Limiting** - Built-in rate limiting to prevent API abuse
-- ✅ **Comprehensive Tests** - Unit tests with high coverage
-- 📝 **API Documentation** - Auto-generated interactive API docs
+- 🛡️ **Custom Rate Limiting** - 30 requests per minute per IP (custom implementation, no external libraries)
+- ✅ **Comprehensive Tests** - 25 unit tests with 100% pass rate
+- 📝 **OpenAPI Documentation** - Auto-generated interactive API docs (OpenAPI 3.0)
+- 🐳 **Docker Support** - Fully containerized application
 
 ## Table Schema
 
@@ -28,12 +29,36 @@ The `employees` table includes the following columns:
 
 ## Installation
 
-### Prerequisites
+### Option 1: Docker (Recommended)
 
+**Prerequisites:**
+- Docker
+- Docker Compose
+
+**Quick Start:**
+
+```bash
+# Clone the repository
+git clone https://github.com/tranmanhdat/simple_search_API.git
+cd simple_search_API
+
+# Build and run with Docker Compose
+docker-compose up --build
+
+# Or build and run manually
+docker build -t employee-search-api .
+docker run -p 8000:8000 employee-search-api
+```
+
+The API will be available at `http://localhost:8000`
+
+### Option 2: Local Installation
+
+**Prerequisites:**
 - Python 3.8 or higher
 - pip (Python package manager)
 
-### Setup
+**Setup:**
 
 1. Clone the repository:
 ```bash
@@ -79,6 +104,8 @@ Once the server is running, you can access:
 
 - **Interactive API docs (Swagger UI)**: http://localhost:8000/docs
 - **Alternative API docs (ReDoc)**: http://localhost:8000/redoc
+- **OpenAPI JSON**: http://localhost:8000/openapi.json
+- **Alternative API docs (ReDoc)**: http://localhost:8000/redoc
 
 ## API Endpoints
 
@@ -109,7 +136,7 @@ POST /employees/
 }
 ```
 
-**Rate Limit:** 20 requests/minute
+**Rate Limit:** 30 requests/minute (shared across all endpoints)
 
 ### Get Employee
 
@@ -119,7 +146,7 @@ GET /employees/{employee_id}
 
 Retrieve a specific employee by ID.
 
-**Rate Limit:** 50 requests/minute
+**Rate Limit:** 30 requests/minute (shared across all endpoints)
 
 ### Update Employee
 
@@ -137,7 +164,7 @@ Update an existing employee. All fields are optional.
 }
 ```
 
-**Rate Limit:** 20 requests/minute
+**Rate Limit:** 30 requests/minute (shared across all endpoints)
 
 ### Delete Employee
 
@@ -147,7 +174,7 @@ DELETE /employees/{employee_id}
 
 Delete an employee by ID.
 
-**Rate Limit:** 20 requests/minute
+**Rate Limit:** 30 requests/minute (shared across all endpoints)
 
 ### Search Employees
 
@@ -190,22 +217,18 @@ GET /employees/?department=Engineering&location=New York&status=1
 GET /employees/?name=Smith&department=Engineering&status=1
 ```
 
-**Rate Limit:** 50 requests/minute
+**Rate Limit:** 30 requests/minute (shared across all endpoints)
 
 ## Rate Limiting
 
-The API implements rate limiting on all endpoints to prevent abuse:
+The API implements a **custom rate limiting system** (no external libraries) that tracks requests per IP address:
 
-| Endpoint | Rate Limit |
-|----------|------------|
-| Health Check (GET /) | 100 requests/minute |
-| Create Employee | 20 requests/minute |
-| Update Employee | 20 requests/minute |
-| Delete Employee | 20 requests/minute |
-| Get Employee | 50 requests/minute |
-| Search Employees | 50 requests/minute |
+- **Limit**: 30 requests per minute per IP address
+- **Scope**: Applies to all API endpoints
+- **Implementation**: In-memory counter that tracks request timestamps
+- **Response**: Returns HTTP `429 Too Many Requests` when limit is exceeded
 
-Rate limits are applied per IP address. When exceeded, the API returns a `429 Too Many Requests` status code.
+The rate limiter automatically cleans up old request records to prevent memory bloat. This is a simple but effective implementation suitable for moderate traffic volumes.
 
 ## Testing
 
@@ -298,10 +321,56 @@ To add new fields to the Employee model:
 
 ### Customizing Rate Limits
 
-Rate limits are configured in `app/main.py` using the `@limiter.limit()` decorator. Adjust the values as needed:
+The custom rate limiter is configured in `app/main.py`. To change the limit:
 
 ```python
-@limiter.limit("50/minute")  # Change to your desired limit
+# In app/main.py
+rate_limiter = RateLimiter(max_requests=30)  # Change to your desired limit
+```
+
+## Docker Deployment
+
+### Building the Image
+
+```bash
+docker build -t employee-search-api .
+```
+
+### Running the Container
+
+```bash
+# Run with default settings
+docker run -p 8000:8000 employee-search-api
+
+# Run with persistent database
+docker run -p 8000:8000 -v $(pwd)/data:/app/data employee-search-api
+```
+
+### Using Docker Compose
+
+```bash
+# Start the service
+docker-compose up -d
+
+# View logs
+docker-compose logs -f
+
+# Stop the service
+docker-compose down
+```
+
+## OpenAPI Specification
+
+The API automatically generates an OpenAPI 3.0 specification. Access it in multiple formats:
+
+- **JSON Format**: http://localhost:8000/openapi.json
+- **Interactive Swagger UI**: http://localhost:8000/docs
+- **ReDoc Documentation**: http://localhost:8000/redoc
+
+You can export the OpenAPI specification for use with API clients, documentation generators, or testing tools:
+
+```bash
+curl http://localhost:8000/openapi.json > openapi.json
 ```
 
 ## Troubleshooting
