@@ -30,11 +30,3 @@ class EmployeeResponse(EmployeeBase):
     id: int
 
     model_config = ConfigDict(from_attributes=True)
-
-
-class SearchParams(BaseModel):
-    name: Optional[str] = None  # Search in first_name and last_name
-    department: Optional[str] = None
-    position: Optional[str] = None
-    location: Optional[str] = None
-    status: Optional[str] = "all"  # "0", "1", "2", "all", or comma-separated like "0,1"

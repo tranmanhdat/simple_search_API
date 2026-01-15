@@ -12,7 +12,6 @@ from app.schemas import (
     EmployeeCreate,
     EmployeeUpdate,
     EmployeeResponse,
-    SearchParams,
 )
 
 # Configure logging

@@ -329,12 +329,16 @@ class TestSearchEmployees:
 
 class TestRateLimiting:
     """Test rate limiting functionality."""
-
-    def test_rate_limit_enforcement(self, client, sample_employee):
-        """Test that rate limiting is enforced."""
-        # Re-enable rate limiting for this test
+    
+    @pytest.fixture
+    def enable_rate_limit(self):
+        """Enable rate limiting for specific tests."""
         limiter.enabled = True
-        
+        yield
+        limiter.enabled = False
+
+    def test_rate_limit_enforcement(self, client, sample_employee, enable_rate_limit):
+        """Test that rate limiting is enforced."""
         # Make multiple requests to trigger rate limit
         # Note: This is a basic test. In production, you might want more sophisticated testing
         responses = []
@@ -344,19 +348,10 @@ class TestRateLimiting:
 
         # At least one request should be rate limited (429)
         assert 429 in responses
-        
-        # Clean up - disable rate limiting again
-        limiter.enabled = False
 
-    def test_rate_limit_different_endpoints(self, client):
+    def test_rate_limit_different_endpoints(self, client, enable_rate_limit):
         """Test that different endpoints have independent rate limits."""
-        # Re-enable rate limiting for this test
-        limiter.enabled = True
-        
         # Health endpoint has 100/minute limit
         for _ in range(10):
             response = client.get("/")
             assert response.status_code == 200
-        
-        # Clean up - disable rate limiting again
-        limiter.enabled = False
