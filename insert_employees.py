@@ -244,10 +244,12 @@ def populate_database(total_records=4_000_000, batch_size=10_000, db_url=None):
     cursor.execute("ANALYZE employees")
     conn.commit()
     
-    # VACUUM ANALYZE for optimal performance
+    # VACUUM ANALYZE for optimal performance (requires autocommit)
     print("Running VACUUM ANALYZE...")
+    old_isolation_level = conn.isolation_level
     conn.set_isolation_level(psycopg2.extensions.ISOLATION_LEVEL_AUTOCOMMIT)
     cursor.execute("VACUUM ANALYZE employees")
+    conn.set_isolation_level(old_isolation_level)  # Restore original isolation level
     
     # Get final statistics
     cursor.execute("SELECT COUNT(*) FROM employees")
