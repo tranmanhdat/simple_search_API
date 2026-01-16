@@ -1,14 +1,16 @@
 #!/usr/bin/env python3
 """
-Script to populate the employee database with 4 million records.
+Script to populate the employee database with 4 million records for PostgreSQL.
 Includes performance testing and optimization.
 """
 
-import sqlite3
+import psycopg2
+from psycopg2.extras import execute_values
 import random
 import time
 import json
 from datetime import datetime
+import os
 
 # Sample data for generating realistic employee records
 FIRST_NAMES = [
@@ -94,39 +96,42 @@ def generate_employee_data(start_id, count):
 
 
 def insert_batch(cursor, employees):
-    """Insert a batch of employees efficiently."""
-    cursor.executemany(
+    """Insert a batch of employees efficiently using PostgreSQL execute_values."""
+    execute_values(
+        cursor,
         """INSERT INTO employees 
            (id, first_name, last_name, contact_info, department, position, location, status) 
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
-        employees
+           VALUES %s""",
+        employees,
+        page_size=1000
     )
 
 
-def populate_database(total_records=4_000_000, batch_size=10_000):
+def populate_database(total_records=4_000_000, batch_size=10_000, db_url=None):
     """
-    Populate the database with the specified number of records.
+    Populate the PostgreSQL database with the specified number of records.
     
     Args:
         total_records: Total number of employee records to create
         batch_size: Number of records to insert per batch
+        db_url: PostgreSQL connection string (default: from DATABASE_URL env var)
     """
+    if db_url is None:
+        db_url = os.getenv(
+            "DATABASE_URL",
+            "postgresql://postgres:postgres@localhost:5432/employees_db"
+        )
+    
     print(f"Starting database population: {total_records:,} records")
     print(f"Batch size: {batch_size:,}")
+    print(f"Database: {db_url.split('@')[1] if '@' in db_url else 'PostgreSQL'}")
     print("-" * 60)
     
-    # Connect to database
-    conn = sqlite3.connect('employees.db')
+    # Connect to PostgreSQL database
+    conn = psycopg2.connect(db_url)
     cursor = conn.cursor()
     
-    # Enable performance optimizations
-    print("Enabling SQLite performance optimizations...")
-    cursor.execute("PRAGMA journal_mode=WAL")
-    cursor.execute("PRAGMA synchronous=NORMAL")
-    cursor.execute("PRAGMA cache_size=10000")
-    cursor.execute("PRAGMA temp_store=MEMORY")
-    
-    # Create table if it doesn't exist
+    # Check if table exists, create if needed
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS employees (
             id INTEGER PRIMARY KEY,
@@ -139,6 +144,7 @@ def populate_database(total_records=4_000_000, batch_size=10_000):
             status INTEGER NOT NULL
         )
     """)
+    conn.commit()
     
     # Check existing records
     cursor.execute("SELECT COUNT(*) FROM employees")
@@ -149,18 +155,20 @@ def populate_database(total_records=4_000_000, batch_size=10_000):
         response = input("Delete existing records? (yes/no): ")
         if response.lower() == 'yes':
             print("Deleting existing records...")
-            cursor.execute("DELETE FROM employees")
+            cursor.execute("TRUNCATE TABLE employees RESTART IDENTITY")
             conn.commit()
+            existing_count = 0
             print("Existing records deleted")
         else:
             print("Keeping existing records, will append new ones")
     
-    # Start insertion
+    # Start insertion with optimizations
     start_time = time.time()
     total_inserted = 0
     batches = total_records // batch_size
     
     print(f"\nInserting {total_records:,} records in {batches} batches...")
+    print("Using PostgreSQL execute_values for optimal performance...")
     
     for batch_num in range(batches):
         batch_start = time.time()
@@ -217,7 +225,11 @@ def populate_database(total_records=4_000_000, batch_size=10_000):
         "CREATE INDEX IF NOT EXISTS idx_location ON employees(location)",
         "CREATE INDEX IF NOT EXISTS idx_status_department ON employees(status, department)",
         "CREATE INDEX IF NOT EXISTS idx_status_location ON employees(status, location)",
+        "CREATE INDEX IF NOT EXISTS idx_status_department_location ON employees(status, department, location)",
         "CREATE INDEX IF NOT EXISTS idx_department_position ON employees(department, position)",
+        # PostgreSQL text pattern ops for LIKE queries
+        "CREATE INDEX IF NOT EXISTS idx_first_name_pattern ON employees(first_name text_pattern_ops)",
+        "CREATE INDEX IF NOT EXISTS idx_last_name_pattern ON employees(last_name text_pattern_ops)",
     ]
     
     for idx_sql in indexes:
@@ -227,10 +239,15 @@ def populate_database(total_records=4_000_000, batch_size=10_000):
     index_time = time.time() - index_start
     print(f"Indexes created in {index_time:.2f} seconds")
     
-    # Analyze database for query optimizer
-    print("Analyzing database for query optimization...")
-    cursor.execute("ANALYZE")
+    # Analyze database for query optimizer (PostgreSQL specific)
+    print("Running ANALYZE for query optimization...")
+    cursor.execute("ANALYZE employees")
     conn.commit()
+    
+    # VACUUM ANALYZE for optimal performance
+    print("Running VACUUM ANALYZE...")
+    conn.set_isolation_level(psycopg2.extensions.ISOLATION_LEVEL_AUTOCOMMIT)
+    cursor.execute("VACUUM ANALYZE employees")
     
     # Get final statistics
     cursor.execute("SELECT COUNT(*) FROM employees")
@@ -244,24 +261,31 @@ def populate_database(total_records=4_000_000, batch_size=10_000):
     print("=" * 60)
     print(f"Total employees: {final_count:,}")
     print(f"Active employees (status=1): {active_count:,}")
-    print(f"Database file: employees.db")
     
     # Get database size
-    cursor.execute("SELECT page_count * page_size as size FROM pragma_page_count(), pragma_page_size()")
+    cursor.execute("""
+        SELECT pg_size_pretty(pg_total_relation_size('employees')) as size
+    """)
     db_size = cursor.fetchone()[0]
-    print(f"Database size: {db_size / (1024**2):.2f} MB")
+    print(f"Table size (with indexes): {db_size}")
     
     conn.close()
     print("\nDatabase population complete!")
 
 
-def test_query_performance():
-    """Test query performance with different filters."""
+def test_query_performance(db_url=None):
+    """Test query performance with different filters on PostgreSQL."""
+    if db_url is None:
+        db_url = os.getenv(
+            "DATABASE_URL",
+            "postgresql://postgres:postgres@localhost:5432/employees_db"
+        )
+    
     print("\n" + "=" * 60)
     print("QUERY PERFORMANCE TESTING")
     print("=" * 60)
     
-    conn = sqlite3.connect('employees.db')
+    conn = psycopg2.connect(db_url)
     cursor = conn.cursor()
     
     test_queries = [
@@ -272,10 +296,14 @@ def test_query_performance():
          "SELECT COUNT(*) FROM employees WHERE status = 1 AND department = 'Engineering'"),
         ("Search by name (LIKE)", 
          "SELECT COUNT(*) FROM employees WHERE first_name LIKE 'John%'"),
+        ("Search by name (ILIKE - case insensitive)", 
+         "SELECT COUNT(*) FROM employees WHERE first_name ILIKE 'john%'"),
         ("Complex filter", 
          "SELECT COUNT(*) FROM employees WHERE status IN (0, 1) AND department = 'Engineering' AND location = 'New York'"),
         ("Get top 100 results",
          "SELECT * FROM employees WHERE status = 1 LIMIT 100"),
+        ("Paginated query with offset",
+         "SELECT * FROM employees WHERE status = 1 ORDER BY id LIMIT 100 OFFSET 1000"),
     ]
     
     for test_name, query in test_queries:
@@ -286,10 +314,25 @@ def test_query_performance():
         
         if "COUNT" in query:
             count = result[0][0] if result else 0
-            print(f"{test_name:40s}: {count:8,} records in {elapsed*1000:6.2f} ms")
+            print(f"{test_name:50s}: {count:10,} records in {elapsed*1000:8.2f} ms")
         else:
             count = len(result)
-            print(f"{test_name:40s}: {count:8,} records in {elapsed*1000:6.2f} ms")
+            print(f"{test_name:50s}: {count:10,} records in {elapsed*1000:8.2f} ms")
+    
+    # Test EXPLAIN ANALYZE for a complex query
+    print("\n" + "-" * 60)
+    print("EXPLAIN ANALYZE for complex query:")
+    print("-" * 60)
+    cursor.execute("""
+        EXPLAIN ANALYZE
+        SELECT * FROM employees 
+        WHERE status = 1 
+          AND department = 'Engineering' 
+          AND location = 'New York'
+        LIMIT 100
+    """)
+    for row in cursor.fetchall():
+        print(row[0])
     
     conn.close()
 

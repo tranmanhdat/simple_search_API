@@ -5,10 +5,17 @@ from sqlalchemy.orm import sessionmaker
 from app.main import app, rate_limiter
 from app.database import Base, get_db, Employee
 import json
+import os
 
-# Create test database
-TEST_DATABASE_URL = "sqlite:///./test_employees.db"
-engine = create_engine(TEST_DATABASE_URL, connect_args={"check_same_thread": False})
+# Create test database (use SQLite for tests for simplicity, but can use PostgreSQL too)
+TEST_DATABASE_URL = os.getenv("TEST_DATABASE_URL", "sqlite:///./test_employees.db")
+
+if TEST_DATABASE_URL.startswith("sqlite"):
+    engine = create_engine(TEST_DATABASE_URL, connect_args={"check_same_thread": False})
+else:
+    # PostgreSQL test database
+    engine = create_engine(TEST_DATABASE_URL)
+
 TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
 

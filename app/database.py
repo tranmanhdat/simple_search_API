@@ -1,14 +1,26 @@
-from sqlalchemy import create_engine, Column, Integer, String, Index
+from sqlalchemy import create_engine, Column, Integer, String, Index, Text
 from sqlalchemy.orm import sessionmaker, DeclarativeBase
+from sqlalchemy.pool import QueuePool
+import os
 
-DATABASE_URL = "sqlite:///./employees.db"
-
-# Note: SQLite doesn't use connection pooling, but these settings
-# are kept for potential future migration to server-based databases
-engine = create_engine(
-    DATABASE_URL, 
-    connect_args={"check_same_thread": False},
+# PostgreSQL connection URL
+# Format: postgresql://username:password@host:port/database
+DATABASE_URL = os.getenv(
+    "DATABASE_URL",
+    "postgresql://postgres:postgres@localhost:5432/employees_db"
 )
+
+# Create engine with connection pooling optimizations for PostgreSQL
+engine = create_engine(
+    DATABASE_URL,
+    poolclass=QueuePool,
+    pool_size=20,              # Number of connections to maintain
+    max_overflow=10,           # Additional connections when pool is exhausted
+    pool_pre_ping=True,        # Verify connections before using them
+    pool_recycle=3600,         # Recycle connections after 1 hour
+    echo=False,                # Set to True for SQL query logging
+)
+
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
 
@@ -20,38 +32,36 @@ class Employee(Base):
     __tablename__ = "employees"
 
     id = Column(Integer, primary_key=True, index=True)
-    first_name = Column(String(100), nullable=False)
-    last_name = Column(String(100), nullable=False)
-    contact_info = Column(String, nullable=False)  # JSON string for phone, email, etc.
-    department = Column(String(100), nullable=False)
-    position = Column(String(100), nullable=False)
-    location = Column(String(100), nullable=False)
-    status = Column(Integer, nullable=False)  # 0, 1, or 2
+    first_name = Column(String(100), nullable=False, index=True)
+    last_name = Column(String(100), nullable=False, index=True)
+    contact_info = Column(Text, nullable=False)  # JSON string for phone, email, etc.
+    department = Column(String(100), nullable=False, index=True)
+    position = Column(String(100), nullable=False, index=True)
+    location = Column(String(100), nullable=False, index=True)
+    status = Column(Integer, nullable=False, index=True)  # 0, 1, or 2
 
-    # Composite indexes for common search patterns
+    # Composite indexes for common search patterns - PostgreSQL performs better with these
     __table_args__ = (
+        # Composite indexes for frequently combined filters
         Index('idx_status_department', 'status', 'department'),
         Index('idx_status_location', 'status', 'location'),
+        Index('idx_status_department_location', 'status', 'department', 'location'),
         Index('idx_department_position', 'department', 'position'),
-        Index('idx_first_name', 'first_name'),
-        Index('idx_last_name', 'last_name'),
-        Index('idx_status', 'status'),
-        Index('idx_department', 'department'),
-        Index('idx_position', 'position'),
-        Index('idx_location', 'location'),
+        # B-tree indexes for text search patterns (PostgreSQL default)
+        # Consider GIN or GiST indexes for full-text search if needed
+        Index('idx_first_name_pattern', 'first_name', postgresql_ops={'first_name': 'text_pattern_ops'}),
+        Index('idx_last_name_pattern', 'last_name', postgresql_ops={'last_name': 'text_pattern_ops'}),
     )
 
 
 def init_db():
-    """Initialize the database by creating all tables."""
+    """Initialize the database by creating all tables and optimizations."""
     Base.metadata.create_all(bind=engine)
     
-    # Enable SQLite performance optimizations
+    # PostgreSQL-specific optimizations
     with engine.connect() as conn:
-        conn.execute("PRAGMA journal_mode=WAL")
-        conn.execute("PRAGMA synchronous=NORMAL")
-        conn.execute("PRAGMA cache_size=10000")
-        conn.execute("PRAGMA temp_store=MEMORY")
+        # Analyze tables for query optimizer statistics
+        conn.execute("ANALYZE employees")
         conn.commit()
 
 
@@ -62,3 +72,4 @@ def get_db():
         yield db
     finally:
         db.close()
+

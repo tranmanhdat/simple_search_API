@@ -1,17 +1,17 @@
 # Employee Search Directory API
 
-A FastAPI-based microservice for searching an employee directory with SQLite database, comprehensive filtering, pagination, and custom rate limiting. Optimized for large datasets (4M+ records).
+A FastAPI-based microservice for searching an employee directory with PostgreSQL database, comprehensive filtering, pagination, and custom rate limiting. Optimized for large datasets (4M+ records).
 
 ## Features
 
 - 🚀 **FastAPI** - Modern, fast web framework for building APIs
-- 💾 **SQLite Database** - Lightweight, serverless database with performance optimizations
+- 💾 **PostgreSQL Database** - Production-ready relational database with advanced indexing
 - 🔍 **Advanced Search** - Search by name, department, position, location, and status with pagination
-- 📊 **Large Dataset Support** - Optimized for 4 million+ records with composite indexes
+- 📊 **Large Dataset Support** - Optimized for 4 million+ records with composite and pattern indexes
 - 🛡️ **Custom Rate Limiting** - 30 requests per minute per IP (custom implementation, no external libraries)
 - ✅ **Comprehensive Tests** - 19 unit tests with 100% pass rate
 - 📝 **OpenAPI Documentation** - Auto-generated interactive API docs (OpenAPI 3.0)
-- 🐳 **Docker Support** - Fully containerized application
+- 🐳 **Docker Support** - Fully containerized application with PostgreSQL container
 - ⚡ **Performance Script** - Bulk insert script for populating and testing with millions of records
 
 ## Table Schema
@@ -31,7 +31,7 @@ The `employees` table includes the following columns:
 
 ## Installation
 
-### Option 1: Docker (Recommended)
+### Option 1: Docker with PostgreSQL (Recommended)
 
 **Prerequisites:**
 - Docker
@@ -44,39 +44,55 @@ The `employees` table includes the following columns:
 git clone https://github.com/tranmanhdat/simple_search_API.git
 cd simple_search_API
 
-# Build and run with Docker Compose
+# Build and run with Docker Compose (includes PostgreSQL)
 docker-compose up --build
 
-# Or build and run manually
-docker build -t employee-search-api .
-docker run -p 8000:8000 employee-search-api
+# The services will start:
+# - PostgreSQL database on port 5432
+# - API service on port 8000
 ```
 
 The API will be available at `http://localhost:8000`
+PostgreSQL will be available at `localhost:5432` (credentials: postgres/postgres)
 
-### Option 2: Local Installation
+### Option 2: Local Installation with PostgreSQL
 
 **Prerequisites:**
 - Python 3.8 or higher
+- PostgreSQL 12+ installed and running
 - pip (Python package manager)
 
 **Setup:**
 
-1. Clone the repository:
+1. Install and configure PostgreSQL:
+```bash
+# Create database
+createdb employees_db
+
+# Or using psql:
+psql -U postgres -c "CREATE DATABASE employees_db;"
+```
+
+2. Clone the repository:
 ```bash
 git clone https://github.com/tranmanhdat/simple_search_API.git
 cd simple_search_API
 ```
 
-2. Create a virtual environment (recommended):
+3. Create a virtual environment (recommended):
 ```bash
 python -m venv venv
 source venv/bin/activate  # On Windows: venv\Scripts\activate
 ```
 
-3. Install dependencies:
+4. Install dependencies:
 ```bash
 pip install -r requirements.txt
+```
+
+5. Set database connection (optional, defaults to localhost):
+```bash
+export DATABASE_URL="postgresql://postgres:postgres@localhost:5432/employees_db"
 ```
 
 ## Running the Application
@@ -86,6 +102,7 @@ pip install -r requirements.txt
 Start the development server with hot reload:
 
 ```bash
+# Make sure PostgreSQL is running first
 uvicorn app.main:app --reload
 ```
 
@@ -170,11 +187,27 @@ GET /employees/?limit=100&offset=100
 
 ## Populating the Database
 
-A high-performance bulk insert script is provided to populate the database with millions of records for testing.
+A high-performance bulk insert script is provided to populate the PostgreSQL database with millions of records for testing.
 
 ### Running the Insert Script
 
+**With Docker Compose:**
 ```bash
+# Ensure containers are running
+docker-compose up -d
+
+# Run the script inside the API container
+docker-compose exec api python3 insert_employees.py
+
+# Or with custom parameters
+docker-compose exec api python3 insert_employees.py 1000000 10000
+```
+
+**Local Installation:**
+```bash
+# Make sure PostgreSQL is running and DATABASE_URL is set
+export DATABASE_URL="postgresql://postgres:postgres@localhost:5432/employees_db"
+
 # Insert 4 million records (default)
 python3 insert_employees.py
 
@@ -187,14 +220,16 @@ python3 insert_employees.py 5000000 20000
 
 The script includes:
 - Progress monitoring with ETA
-- Automatic index creation
-- Performance testing of common queries
+- Automatic index creation (12 indexes including composite and pattern indexes)
+- PostgreSQL-specific optimizations (VACUUM ANALYZE)
+- Performance testing of common queries with EXPLAIN ANALYZE
 - Database statistics reporting
 
 **Performance Characteristics:**
-- Inserts ~50,000-100,000 records/second (depending on hardware)
-- Creates composite indexes for optimal query performance
-- Includes query performance benchmarks
+- Inserts ~50,000-150,000 records/second (depending on hardware)
+- Uses PostgreSQL's `execute_values` for batch insertion
+- Creates B-tree and text_pattern_ops indexes for optimal search performance
+- Includes query performance benchmarks showing sub-millisecond response times
 
 ## Rate Limiting
 
